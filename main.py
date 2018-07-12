@@ -8,16 +8,16 @@ import time
 from nltk.tokenize import word_tokenize
 from nltk.corpus import stopwords
 from stop_words import get_stop_words
-from nltk.stem.porter import PorterStemmer
+from nltk.stem.lancaster import LancasterStemmer
 
 # generate stopwords set as preparation of cleaning PR contents
 stop_nltk = set(stopwords.words("english"))
-stop_Add = set(["add", "delete", "note", "thank", "another", "please", "per", "test", "implement", "complete", "hello", "fix", "say", "said", "would", "one", "back", "could", "thought", "think", "see", "seem", "want", "like", "still", "go", "went", "around", "make", "made", "come", "came", "hi", "much", "wa", "well", "though", "only", "onli", "might", "away", "even", "know", "many", "good", "get", "got", "right", "must", "great", "us", "something", "yet", "app", "use", "really", "day", "put", "set", "ok"])
+stop_Add = set(["et", "al", "etc", "add", "delete", "note", "thank", "another", "please", "per", "test", "implement", "complete", "hello", "fix", "say", "said", "would", "one", "back", "could", "thought", "think", "see", "seem", "want", "like", "still", "go", "went", "around", "make", "made", "come", "came", "hi", "much", "wa", "well", "though", "only", "onli", "might", "away", "even", "know", "many", "good", "get", "got", "right", "must", "great", "us", "something", "yet", "app", "use", "really", "day", "put", "set", "ok"])
 stop_sw = set(get_stop_words('en'))
 stopW = stop_nltk.union(stop_Add).union(stop_sw)
 
 # Stemming tools. Used for cleaning PR contents
-p_stemmer = PorterStemmer()
+p_stemmer = LancasterStemmer()
 
 ###############################################################################
 # list of all authors in the training dataset of a project. 
@@ -32,6 +32,14 @@ authors = AuthorList()
 # vectorScore[i] is a vector score, performing as a list, of the i-th PR
 ###############################################################################
 vectorScore = []
+
+###############################################################################
+# List of models of vector scores of all PRs in vector space. 
+# Only training dataset included
+# Reset before training each project
+# vectorModel[i] is a value being the model value of vectorScore[i]
+###############################################################################
+vectorModel = []
 
 ###############################################################################
 # Chart of relation scores in common networks. Only training dataset included
@@ -77,10 +85,19 @@ def judgeLegal(word):
 def judgeEnglish(word):
     return word.isalpha() and judgeLegal(word)
 
+def getTopK(K, lis):
+    if (K == 0):
+        return
+    if (lis[K][0] > lis[K-1][0]):
+        tmp = lis[K]
+        lis[K] = lis[K-1]
+        lis[K-1] = tmp
+        getTopK(K-1, lis)
+    return
 
 # Train models from training dataset
 def Train(file):
-    global PRs, vectorBase, vectorBaseCnt, relationScore, vectorScore, authors, baseline, deadline
+    global PRs, vectorBase, vectorBaseCnt, relationScore, vectorScore, authors, baseline, deadline, vectorModel
     
     # Reset of global variables
     baseline = time.time()
@@ -89,6 +106,8 @@ def Train(file):
     PRs = []
     vectorBase = []
     vectorBaseCnt = []
+    vectorScore = []
+    vectorModel = []
     authors.clear()
     
     # Read each line (PR) from training dataset
@@ -148,6 +167,8 @@ def Train(file):
     
     # Part A Score. Calculate tfidf for each PR and get its score in the vector space
     vectorScore = vectorSpace.tfidf(PRs, vectorBase, vectorBaseCnt, len(PRs))
+    for each in vectorScore:
+        vectorModel.append(expertise.model(each))
     
     # Part C Score. Calculate common network scores among authors.
     baseline -= 24 * 3600
@@ -161,9 +182,14 @@ def Train(file):
     
     return 0
 
+predictCnt = 0
+correctCnt = 0
+actualCnt = 0
+
 # Running test dataset
 def Test(file):
-    global PRs, vectorBase, vectorBaseCnt, relationScore, vectorScore, authors, baseline, deadline
+    global PRs, vectorBase, vectorBaseCnt, relationScore, vectorScore, authors, baseline, deadline, vectorModel
+    global predictCnt, correctCnt, actualCnt
     
     # Maximum tolerance of differece as equalization. i.e. when abs(a-b)<minRel, we regard a=b
     minRel = 1e-10
@@ -171,13 +197,11 @@ def Test(file):
     # Read test dataset
     csv_file = csv.reader(open(file,'r',errors='ignore'))
     
-    # reset accuracy data
-    predictCnt = 0
-    correctCnt = 0
-    actualCnt = 0
-    
-    # Set top-K estimation to top-5
+    # Set top-K-user estimation to top-5
     K = 5
+    
+    # Set top-r-closest PRs to top-10-closest PR
+    r = 10
     
     # For each line in test dataset
     for e, testcase in enumerate(csv_file):
@@ -185,8 +209,8 @@ def Test(file):
         if (testcase[0] != "PR"):
             continue
         
-        if (e > 100):
-            break
+        # if (e > 100):
+        #   break
         # Get title & content of the testcase. And merge them.
         contentTitle = word_tokenize(testcase[1])
         contentDetail = word_tokenize(testcase[2])
@@ -215,31 +239,36 @@ def Test(file):
             
             # Find k closest PRs based on cosine similarities of vector scores, then calculate Expertise Scores for related authors; k = 5
             totalScore = [0.0]*authors.length()
-            cosV = []
-            index = []
             
-            # cosine similarities with each PR in training dataset
-            for i in range(len(PRs)):
-                index.append(i)
-                cosV.append(expertise.cos(vectorScore[i], testScore))
+            # Model of vector score of the testcase
+            testModel = expertise.model(testScore)
+            
+            if (testModel > minRel):
+                topR = [[0,-1] for e in range(r+1)]
+                # cosine similarities with each PR in training dataset
+                for i in range(len(PRs)):
+                    score = expertise.cos(vectorScore[i], testScore, vectorModel[i], testModel)
+                    if (score < minRel):
+                        continue
+                    if (score > topR[r][0]):
+                        topR[r] = [score,i]
+                        getTopK(r, topR)
                 
-            # Pack scores & indices together. Sort them by cosine similarities. And get k largest ones.
-            pac = list(zip(cosV, index))
-            pac.sort()
-            topK = pac[-K:]
+                # Get k largest ones.
+                topR = topR[:r]
          
-            # For each PR in k largest similarity PRs. sc being the similarity score, ind being the index of PR in training dataset
-            for sc, ind in topK:
+                # For each PR in k largest similarity PRs. sc being the similarity score, ind being the index of PR in training dataset
+                for sc, ind in topR:
                 
-                # if the score is equal to 0, there is no relation, which happens when only fewer than k PRs in training dataset are related to the testcase PR
-                if sc == 0:
-                    continue    
+                    # if the score is equal to 0, there is no relation, which happens when only fewer than k PRs in training dataset are related to the testcase PR
+                    if sc == 0 or ind == -1:
+                        continue    
                 
-                # Get authors related to the training PR and add Expertise Scores for them
-                usrList = PRs[ind][4].split(",")
-                for eachUsr in usrList:
-                    usrid = authors.find(eachUsr)[0]
-                    totalScore[usrid] += sc
+                    # Get authors related to the training PR and add Expertise Scores for them
+                    usrList = PRs[ind][4].split(",")
+                    for eachUsr in usrList:
+                        usrid = authors.find(eachUsr)[0]
+                        totalScore[usrid] += sc
         
             # Add common network score, and check the result
             # dedic is the list of all authors related in this testcase PR
@@ -252,18 +281,18 @@ def Test(file):
             # If the contributor doesn't exist in the author list, existance will get a value of False, otherwise True
             [con_id, existance] = authors.find(contributor)
             
-            index = []
+            topKusr = [[0,-1] for e in range(K+1)]
             # Add common network scores for each author related to the contributor
             for i in range(authors.length()):
-                index.append(i)
                 # if the contributor exists in the author list from training dataset
                 if existance:
                     totalScore[i] += relationScore[con_id][i]
+                if (totalScore[i] > topKusr[K][0]):
+                    topKusr[K] = [totalScore[i], i]
+                    getTopK(K, topKusr)
                 
-            # Pack total scores & indices together. Sort them by total scores. And get k largest ones.
-            pac = list(zip(totalScore, index))
-            pac.sort()
-            topKusr = pac[-K:]
+            # Get k largest ones.
+            topKusr = topKusr[:K]
             
             # K closest authors to the testcase PR are predicted. Add K into the predict counter. For Precision
             predictCnt += len(topKusr)
@@ -271,12 +300,15 @@ def Test(file):
             predictList = []
             # sc being the total score of the author, ind being its index in author list
             for sc, ind in topKusr:
+                if (ind == -1):
+                    predictCnt -= 1
+                    continue
                 name = authors.getName(ind)
                 predictList.append(name)
                 # if the author predicted is in the testcase result, it is correctly predicted
                 if name in dedic:
                     correctCnt += 1
-            
+                
             # Add all authors related to this testcase PR into counters for Recall
             actualCnt += len(set(dedic))
             # Print the predict list and actual list of authors related to the testcase PR
@@ -310,6 +342,11 @@ if __name__ == "__main__":
     for root, dirs, files in os.walk(file_dir):
         for d in dirs:
             reviews.append(os.path.join(root, d))
+            
+    # reset accuracy data
+    predictCnt = 0
+    correctCnt = 0
+    actualCnt = 0
     
     # process each project
     for each in reviews:

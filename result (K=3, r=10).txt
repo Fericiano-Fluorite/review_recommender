@@ -1,0 +1,22 @@
+./archive/apacheincubator
+Precision: 0.3989828941285252 Recall: 0.5149164677804295
+./archive/bootstrap
+Precision: 0.40547039374812144 Recall: 0.5914072775098641
+./archive/Exoplayer
+Precision: 0.4028612303290415 Recall: 0.5961049957662997
+./archive/jquery
+Precision: 0.4097323600973236 Recall: 0.6061915046796257
+./archive/k9
+Precision: 0.42437684833122097 Recall: 0.6365652724968315
+./archive/node
+Precision: 0.42911720562150363 Recall: 0.5083239049620172
+./archive/rails
+Precision: 0.41795366795366795 Recall: 0.5261239368165249
+./archive/react
+Precision: 0.4234161267098632 Recall: 0.5480489225393127
+./archive/Signal
+Precision: 0.4242657761794674 Recall: 0.5560543148917069
+./archive/symfony
+Precision: 0.44697301239970827 Recall: 0.5642725598526703
+./archive/tensorflow
+Precision: 0.43817097415506956 Recall: 0.5692148760330579

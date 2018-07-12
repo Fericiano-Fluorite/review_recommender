@@ -14,5 +14,9 @@ def dot(lis1, lis2):
         sum += float(a) * float(b)
     return sum
 
-def cos(lis1, lis2):
-    return dot(lis1, lis2)/(model(lis1)*model(lis2))
+def cos(lis1, lis2, mod1 = 0, mod2 = 0):
+    if mod1 == 0:
+        mod1 = model(lis1)
+    if mod2 == 0:
+        mod2 = model(lis2)
+    return dot(lis1, lis2)/(mod1*mod2)
